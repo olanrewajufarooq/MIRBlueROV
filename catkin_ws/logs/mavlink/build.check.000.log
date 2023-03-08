@@ -1,0 +1,1 @@
+/usr/bin/cmake -S/home/farooq/Documents/MIRBlueROV/catkin_ws/src/mavlink -B/home/farooq/Documents/MIRBlueROV/catkin_ws/build/mavlink --check-build-system CMakeFiles/Makefile.cmake 0
