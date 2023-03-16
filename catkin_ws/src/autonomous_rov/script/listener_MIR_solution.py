@@ -105,6 +105,9 @@ def joyCallback(data):
 		init_a0 = True
 		init_p0 = True
 		# set sum errors to 0 here, ex: Sum_Errors_Vel = [0]*3
+
+		Sum_Errors_depth = 0
+
 		set_mode[0] = False
 		set_mode[1] = False
 		set_mode[2] = True
@@ -255,10 +258,19 @@ def PressureCallback(data):
 	depth_wrt_startup = (pressure - 101300)/(rho*g) - depth_p0
 
 	# setup depth servo control here
-	# ...
+	depth_des = 0.8
+	Kp_depth = 1
+	Ki_depth = 0
+
+	floatability = 0 # Adding the floatability as a PMW value.
+
+	error = depth_des - depth_wrt_startup
+	Sum_Errors_depth += error 
+
+	control_signal = Kp * error + floatability + Ki_depth * Sum_Errors_depth
 
 	# update Correction_depth
-	Correction_depth = 1500	
+	Correction_depth = 1500	+ control_signal
 	# Send PWM commands to motors
 	Correction_depth = int(Correction_depth)
 	setOverrideRCIN(1500, 1500, Correction_depth, 1500, 1500, 1500)
