@@ -64,6 +64,23 @@ r = 0               # angular heave velocity
 
 # ---------- Functions---------------
 
+# TASK 1.1 Start
+def force_to_PWM(f):
+	"""
+	This is a function that converts the force values to PWM for the motors.
+	"""
+
+	if f > 0:
+		PWM = a + b * math.abs(f)
+	elif f < 0:
+		PWM = a + b * math.abs(f)
+	else:
+		PWM = 1500
+	
+	return PWM
+# TASK 1.1 END
+
+
 def joyCallback(data):
 	global arming
 	global set_mode
@@ -106,12 +123,16 @@ def joyCallback(data):
 		init_p0 = True
 		# set sum errors to 0 here, ex: Sum_Errors_Vel = [0]*3
 
+		# TASK [All PI and PID Controls]
 		Sum_Errors_depth = 0
+		Sum_Errors_angle_yaw = 0
+		# TASK End
 
 		set_mode[0] = False
 		set_mode[1] = False
 		set_mode[2] = True
 		rospy.loginfo("Mode correction")
+
 
 def armDisarm(armed):
 	# This functions sends a long command service with 400 code to arm or disarm motors
@@ -150,12 +171,14 @@ def velCallback(cmd_vel):
 
 	setOverrideRCIN(pitch_left_right, roll_left_right, ascend_descend, yaw_left_right, forward_reverse, lateral_left_right)
 
+
 def pingerCallback(data):
 	global pinger_confidence
 	global pinger_distance
 
 	pinger_distance = data.data[0]
 	pinger_confidence = data.data[1]
+
 
 def OdoCallback(data):
 	global angle_roll_a0
@@ -211,8 +234,14 @@ def OdoCallback(data):
 		return
 
 	# Send PWM commands to motors
-	# yaw command to be adapted using sensor feedback	
+	# yaw command to be adapted using sensor feedback
+
+	# TASK 1.4 Start
+
+
 	Correction_yaw = 1500 
+	# TASK 1.4 End
+
 	setOverrideRCIN(1500, 1500, 1500, Correction_yaw, 1500, 1500)
 
 
@@ -231,6 +260,12 @@ def DvlCallback(data):
 	Vel.linear.y = v
 	Vel.linear.z = w
 	pub_linear_velocity.publish(Vel)
+
+# TASK 2.6 Start
+def estimateHeave():
+	pass
+# TASK 2.6 End
+
 
 def PressureCallback(data):
 	global depth_p0
@@ -258,7 +293,9 @@ def PressureCallback(data):
 	depth_wrt_startup = (pressure - 101300)/(rho*g) - depth_p0
 
 	# setup depth servo control here
+	# TASK 1.5, 1.6, 2.3, 2.5, 2.7 Start
 	depth_des = 0.8
+	
 	Kp_depth = 1
 	Ki_depth = 0
 
@@ -267,13 +304,17 @@ def PressureCallback(data):
 	error = depth_des - depth_wrt_startup
 	Sum_Errors_depth += error 
 
-	control_signal = Kp * error + floatability + Ki_depth * Sum_Errors_depth
+	f = Kp * error + floatability + Ki_depth * Sum_Errors_depth
 
 	# update Correction_depth
-	Correction_depth = 1500	+ control_signal
+	Correction_depth = force_to_PWM(f)
+
+	# TASK 1.5, 1.6, 2.3, 2.5, 2.7 End
+
 	# Send PWM commands to motors
 	Correction_depth = int(Correction_depth)
 	setOverrideRCIN(1500, 1500, Correction_depth, 1500, 1500, 1500)
+
 
 def mapValueScalSat(value):
 	# Correction_Vel and joy between -1 et 1
@@ -316,6 +357,7 @@ def subscriber():
 	#rospy.Subscriber("/dvl/data", DVL, DvlCallback)
 	rospy.Subscriber("distance_sonar", Float64MultiArray, pingerCallback)
 	rospy.spin()
+
 
 if __name__ == '__main__':
 	armDisarm(False)  # Not automatically disarmed at startup
