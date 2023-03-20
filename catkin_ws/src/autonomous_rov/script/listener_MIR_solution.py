@@ -237,9 +237,17 @@ def OdoCallback(data):
 	# yaw command to be adapted using sensor feedback
 
 	# TASK 1.4 Start
-
-
-	Correction_yaw = 1500 
+	# desired yaw angle
+	yaw_d = 45
+	#PI parameters to tune  
+	kp_yaw = 1
+	ki_yaw = 0
+	# error calculation
+	yaw_err = yaw_d - angle_wrt_startup[2]
+	Sum_Errors_angle_yaw += yaw_err * sample_time # might define it as global variable
+	# PI controller 
+	control_yaw = kp_yaw * yaw_err + ki_yaw * Sum_Errors_angle_yaw
+	Correction_yaw = force_to_PWM (control_yaw) 
 	# TASK 1.4 End
 
 	setOverrideRCIN(1500, 1500, 1500, Correction_yaw, 1500, 1500)
