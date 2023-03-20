@@ -68,12 +68,26 @@ r = 0               # angular heave velocity
 def force_to_PWM(f):
 	"""
 	This is a function that converts the force values to PWM for the motors.
+
+	16V:
+	Positive - Intercept: 1563.8915056025264, Slope: 6.6609554433778975
+	Negative - Intercept: 1437.5105488646336, Slope: 8.556474591368337
+
+	14.8V:
+	Positive - Intercept: 1563.8915056025264, Slope: 6.6609554433778975
+	Negative - Intercept: 1437.5105488646336, Slope: 8.556474591368337
+	
+	11.1V:
+	Positive - Intercept: 1563.8915056025264, Slope: 6.6609554433778975
+	Negative - Intercept: 1437.5105488646336, Slope: 8.556474591368337
+
+	Currently in Use: 16V
 	"""
 
 	if f > 0:
-		PWM = a + b * math.abs(f)
+		PWM = 1563.8915 + 6.6610 * f
 	elif f < 0:
-		PWM = a + b * math.abs(f)
+		PWM = 1437.5105 + 8.5565 * f
 	else:
 		PWM = 1500
 	
@@ -190,6 +204,8 @@ def OdoCallback(data):
 	global q
 	global r
 
+	global Sum_Errors_angle_yaw
+
 	orientation = data.orientation
 	angular_velocity = data.angular_velocity
 
@@ -236,19 +252,23 @@ def OdoCallback(data):
 	# Send PWM commands to motors
 	# yaw command to be adapted using sensor feedback
 
-	# TASK 1.4 Start
-	# desired yaw angle
-	yaw_d = 45
+	# TASK 1.4, 2.5 Start
+	
+	yaw_des = 0 # desired yaw angle
+	
 	#PI parameters to tune  
 	kp_yaw = 1
 	ki_yaw = 0
+	
 	# error calculation
-	yaw_err = yaw_d - angle_wrt_startup[2]
-	Sum_Errors_angle_yaw += yaw_err * sample_time # might define it as global variable
+	yaw_err = yaw_des - angle_wrt_startup[2]
+	Sum_Errors_angle_yaw += yaw_err # we need to define SAMPLE TIME
+	
 	# PI controller 
 	control_yaw = kp_yaw * yaw_err + ki_yaw * Sum_Errors_angle_yaw
 	Correction_yaw = force_to_PWM (control_yaw) 
-	# TASK 1.4 End
+	
+	# TASK 1.4, 2.5 End
 
 	setOverrideRCIN(1500, 1500, 1500, Correction_yaw, 1500, 1500)
 
@@ -270,8 +290,31 @@ def DvlCallback(data):
 	pub_linear_velocity.publish(Vel)
 
 
+def cubic_traj(t):
+
+	z_init = 0
+	z_final = 0.8
+
+	t_final = 20
+
+	if t < t_final:
+		a2 = 3 * (z_final - z_init) / (t ** 2)
+		a3 = -2 * (z_final - z_init) / (t ** 3)
+
+		z = z_init + a2 * t**2 + a3 * t**3
+		z_dot = 2 * a2*t + 3 * a3 * t**2
+
+	elif t >= t_final:
+		z = z_final
+		z_dot = 0
+
+	return z, z_dot
+
 # TASK 2.6 Start
-def estimateHeave():
+def estimateHeave(depth):
+	alpha = 0.45
+	beta = 0.1
+
 	pass
 # TASK 2.6 End
 
@@ -304,16 +347,19 @@ def PressureCallback(data):
 	# setup depth servo control here
 	# TASK 1.5, 1.6, 2.3, 2.5, 2.7 Start
 	depth_des = 0.8
+	#depth_des, depth_des_dot = cubic_traj(t) # For Practical Work 2
 	
 	Kp_depth = 1
 	Ki_depth = 0
+	Kd_depth = 0
 
 	floatability = 0 # Adding the floatability as a PMW value.
 
 	error = depth_des - depth_wrt_startup
 	Sum_Errors_depth += error 
 
-	f = Kp * error + floatability + Ki_depth * Sum_Errors_depth
+	f = Kp_depth * error + Ki_depth * Sum_Errors_depth + floatability 
+	#f = Kp_depth * error + Ki_depth * Sum_Errors_depth + Kd_depth * ( depth_des_dot - estimateHeave(depth_wrt_startup) ) + floatability 
 
 	# update Correction_depth
 	Correction_depth = force_to_PWM(f)
