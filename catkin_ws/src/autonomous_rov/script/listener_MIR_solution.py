@@ -261,6 +261,7 @@ def DvlCallback(data):
 	Vel.linear.z = w
 	pub_linear_velocity.publish(Vel)
 
+
 # TASK 2.6 Start
 def estimateHeave():
 	pass
