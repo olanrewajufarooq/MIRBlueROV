@@ -294,7 +294,6 @@ def cubic_traj(t):
 
 	z_init = 0
 	z_final = 0.8
-
 	t_final = 20
 
 	if t < t_final:
@@ -323,6 +322,9 @@ def PressureCallback(data):
 	global depth_p0
 	global depth_wrt_startup
 	global init_p0
+	
+	global Sum_Errors_depth
+
 	rho = 1000.0 # 1025.0 for sea water
 	g = 9.80665
 
