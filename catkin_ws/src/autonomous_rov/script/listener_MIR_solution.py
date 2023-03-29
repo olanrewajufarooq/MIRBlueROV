@@ -62,6 +62,9 @@ p = 0               # angular roll velocity
 q = 0               # angular pitch velocity 
 r = 0               # angular heave velocity 
 
+#Sample time
+sample_time = 1/20
+
 # ---------- Functions---------------
 
 # TASK 1.1 Start
@@ -310,11 +313,27 @@ def cubic_traj(t):
 	return z, z_dot
 
 # TASK 2.6 Start
-def estimateHeave(depth):
+def estimateHeave(depth, prev_depth=None, prev_heave=None):
+	global sample_time
 	alpha = 0.45
 	beta = 0.1
 
-	pass
+	if prev_depth is None:
+		heave = 0
+	else:
+		heave = (depth - prev_depth) / sample_time
+
+    # Update position and velocity estimates using alpha-beta filter
+	if prev_heave is None:
+		filtered_depth = depth
+		filtered_heave = heave
+	else:
+		filtered_depth = prev_depth + sample_time * prev_heave + 0.5 * beta * sample_time**2 * (heave + prev_heave)
+		filtered_heave = prev_heave + alpha * sample_time * (heave + prev_heave)
+
+	return filtered_heave
+
+	
 # TASK 2.6 End
 
 
