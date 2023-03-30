@@ -59,8 +59,8 @@ for bagFile in listOfBagFiles:
 
 
 	#create a new directory
-	folder = str.rstrip(bagName, ".bag")
-	# folder = 'dataMeasurements';
+	folder = './' + str.rstrip(bagName, ".bag")
+	# folder = '/dataMeasurements'
 	try:	#else already exists
 		os.makedirs(folder)
 	except:
@@ -72,7 +72,7 @@ for bagFile in listOfBagFiles:
 	#get list of topics from the bag
 	listOfTopics = []
 	for topic, msg, t in bagContents:
-		if topic not in listOfTopics:
+		if ( topic not in listOfTopics ) and ( topic not in ['/rosout', '/rosout_agg'] ):
 			listOfTopics.append(topic)
 
 	print(listOfTopics)
@@ -144,6 +144,7 @@ for bagFile in listOfBagFiles:
 				# write the value from each pair to the file
 				values = [str(t)]	#first column will have rosbag timestamp
 				for pair in instantaneousListOfData:
+					# print(pair)
 					values.append(pair[1])
 				filewriter.writerow(values)
 	bag.close()

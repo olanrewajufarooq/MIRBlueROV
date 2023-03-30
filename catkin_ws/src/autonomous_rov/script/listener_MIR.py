@@ -53,6 +53,9 @@ pinger_distance = 0
 Vmax_mot = 1900
 Vmin_mot = 1100
 
+#Sample time
+sample_time = 1/20
+
 # Linear/angular velocity 
 u = 0               # linear surge velocity 
 v = 0               # linear sway velocity
@@ -81,13 +84,17 @@ def force_to_PWM(f):
 	Positive - Intercept: 1563.8915056025264, Slope: 6.6609554433778975
 	Negative - Intercept: 1437.5105488646336, Slope: 8.556474591368337
 
+	12V:
+	Positive - Intercept: 1568.1841920414354, Slope: 9.264095453590867
+	Negative - Intercept: 1433.6772068472728, Slope: 11.876213274212262
+
 	Currently in Use: 16V
 	"""
 
 	if f > 0:
-		PWM = 1563.8915 + 6.6610 * f
+		PWM = 1536 + 9.2641 * f
 	elif f < 0:
-		PWM = 1437.5105 + 8.5565 * f
+		PWM = 1464 + 11.8762 * f
 	else:
 		PWM = 1500
 	
@@ -210,8 +217,8 @@ def OdoCallback(data):
 	angular_velocity = data.angular_velocity
 
 	# extraction of yaw angle
-	q = [orientation.x, orientation.y, orientation.z, orientation.w]
-	euler = tf.transformations.euler_from_quaternion(q)
+	quarternion = [orientation.x, orientation.y, orientation.z, orientation.w]
+	euler = tf.transformations.euler_from_quaternion(quarternion)
 	angle_roll = euler[0]
 	angle_pitch = euler[1]
 	angle_yaw = euler[2]
@@ -243,6 +250,7 @@ def OdoCallback(data):
 	vel.angular.x = p
 	vel.angular.y = q
 	vel.angular.z = r
+
 	pub_angular_velocity.publish(vel)
 
 	# Only continue if manual_mode is disabled
@@ -257,12 +265,12 @@ def OdoCallback(data):
 	yaw_des = 0 # desired yaw angle
 	
 	#PI parameters to tune  
-	kp_yaw = 1
+	kp_yaw = 0.01
 	ki_yaw = 0
 	
 	# error calculation
 	yaw_err = yaw_des - angle_wrt_startup[2]
-	Sum_Errors_angle_yaw += yaw_err # we need to define SAMPLE TIME
+	Sum_Errors_angle_yaw += yaw_err * sample_time # we need to define SAMPLE TIME
 	
 	# PI controller 
 	control_yaw = kp_yaw * yaw_err + ki_yaw * Sum_Errors_angle_yaw
@@ -310,11 +318,27 @@ def cubic_traj(t):
 	return z, z_dot
 
 # TASK 2.6 Start
-def estimateHeave(depth):
+def estimateHeave(depth, prev_depth=None, prev_heave=None):
+	global sample_time
+
 	alpha = 0.45
 	beta = 0.1
 
-	pass
+	if prev_depth is None:
+		heave = 0
+	else:
+		heave = (depth - prev_depth) / sample_time
+
+    # Update position and velocity estimates using alpha-beta filter
+	if prev_heave is None:
+		filtered_depth = depth
+		filtered_heave = heave
+		
+	else:
+		filtered_depth = prev_depth + sample_time * prev_heave + 0.5 * beta * sample_time**2 * (heave + prev_heave)
+		filtered_heave = prev_heave + alpha * sample_time * (heave + prev_heave)
+
+	return filtered_heave
 # TASK 2.6 End
 
 
@@ -322,6 +346,7 @@ def PressureCallback(data):
 	global depth_p0
 	global depth_wrt_startup
 	global init_p0
+	global t
 	
 	global Sum_Errors_depth
 
@@ -342,29 +367,39 @@ def PressureCallback(data):
 	if (init_p0):
 		# 1st execution, init
 		depth_p0 = (pressure - 101300)/(rho*g)
+		t = 0
 		init_p0 = False
 
 	depth_wrt_startup = (pressure - 101300)/(rho*g) - depth_p0
 
+	# Publishing the Depth Data
+	
+	current_depth = Float64()
+	current_depth.data = depth_wrt_startup
+	pub_depth.publish(current_depth)
+
 	# setup depth servo control here
 	# TASK 1.5, 1.6, 2.3, 2.5, 2.7 Start
 	depth_des = 0.8
-	#depth_des, depth_des_dot = cubic_traj(t) # For Practical Work 2
 	
-	Kp_depth = 1
+	#depth_des, depth_des_dot = cubic_traj(t) # For Practical Work 2
+	#t = t + sample_time
+	
+	Kp_depth = 0
 	Ki_depth = 0
 	Kd_depth = 0
 
-	floatability = 0 # Adding the floatability as a PMW value.
+	floatability = 3.5 # Adding the floatability as a PMW value.
 
 	error = depth_des - depth_wrt_startup
-	Sum_Errors_depth += error 
+	Sum_Errors_depth += error * sample_time
 
 	f = Kp_depth * error + Ki_depth * Sum_Errors_depth + floatability 
 	#f = Kp_depth * error + Ki_depth * Sum_Errors_depth + Kd_depth * ( depth_des_dot - estimateHeave(depth_wrt_startup) ) + floatability 
 
 	# update Correction_depth
 	Correction_depth = force_to_PWM(f)
+	# Correction_depth = int(1595.9765)
 
 	# TASK 1.5, 1.6, 2.3, 2.5, 2.7 End
 
