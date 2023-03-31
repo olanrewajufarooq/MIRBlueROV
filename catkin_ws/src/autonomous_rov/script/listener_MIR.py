@@ -54,6 +54,7 @@ Vmax_mot = 1900
 Vmin_mot = 1100
 
 #Sample time
+t = 0
 sample_time = 1/20
 
 # Linear/angular velocity 
@@ -201,6 +202,24 @@ def pingerCallback(data):
 	pinger_confidence = data.data[1]
 
 
+def cubic_traj_yaw(current_time):
+
+	z_init = 0
+	z_final = z_init + 90
+	t_final = 10
+
+	if current_time < t_final:
+		a2 = 3 * (z_final - z_init) / (t_final ** 2)
+		a3 = -2 * (z_final - z_init) / (t_final ** 3)
+
+		z = z_init + a2 * current_time**2 + a3 * current_time**3
+
+	elif current_time >= t_final:
+		z = z_final
+
+	return z
+
+
 def OdoCallback(data):
 	global angle_roll_a0
 	global angle_pitch_a0
@@ -210,6 +229,8 @@ def OdoCallback(data):
 	global p
 	global q
 	global r
+	global sample_time
+	global t
 
 	global Sum_Errors_angle_yaw
 
@@ -229,6 +250,7 @@ def OdoCallback(data):
 		angle_pitch_a0 = angle_pitch
 		angle_yaw_a0 = angle_yaw
 		init_a0 = False
+		t = 0
 
 	angle_wrt_startup[0] = ((angle_roll - angle_roll_a0 + 3.0*math.pi)%(2.0*math.pi) - math.pi) * 180/math.pi
 	angle_wrt_startup[1] = ((angle_pitch - angle_pitch_a0 + 3.0*math.pi)%(2.0*math.pi) - math.pi) * 180/math.pi
@@ -262,23 +284,25 @@ def OdoCallback(data):
 
 	# TASK 1.4, 2.5 Start
 	
-	yaw_des = 0 # desired yaw angle
+	# yaw_des = 0 # desired yaw angle
+	yaw_des = cubic_traj_yaw(t)
+	t = t + sample_time
 	
 	#PI parameters to tune  
-	kp_yaw = 0.01
-	ki_yaw = 0
+	kp_yaw = 0.1
+	ki_yaw = 0.0005
 	
 	# error calculation
 	yaw_err = yaw_des - angle_wrt_startup[2]
 	Sum_Errors_angle_yaw += yaw_err * sample_time # we need to define SAMPLE TIME
 	
 	# PI controller 
-	control_yaw = kp_yaw * yaw_err + ki_yaw * Sum_Errors_angle_yaw
-	Correction_yaw = force_to_PWM (control_yaw) 
+	f = -(kp_yaw * yaw_err + ki_yaw * Sum_Errors_angle_yaw)/4
+	Correction_yaw = force_to_PWM(f) 
 	
 	# TASK 1.4, 2.5 End
-
-	setOverrideRCIN(1500, 1500, 1500, Correction_yaw, 1500, 1500)
+	Correction_yaw = int(Correction_yaw)
+	# setOverrideRCIN(1500, 1500, 1500, Correction_yaw, 1500, 1500)
 
 
 def DvlCallback(data):
@@ -298,20 +322,20 @@ def DvlCallback(data):
 	pub_linear_velocity.publish(Vel)
 
 
-def cubic_traj(t):
+def cubic_traj_depth(current_time):
 
 	z_init = 0
-	z_final = 0.8
+	z_final = 0.4
 	t_final = 20
 
-	if t < t_final:
-		a2 = 3 * (z_final - z_init) / (t ** 2)
-		a3 = -2 * (z_final - z_init) / (t ** 3)
+	if current_time < t_final:
+		a2 = 3 * (z_final - z_init) / (t_final ** 2)
+		a3 = -2 * (z_final - z_init) / (t_final ** 3)
 
-		z = z_init + a2 * t**2 + a3 * t**3
-		z_dot = 2 * a2*t + 3 * a3 * t**2
+		z = z_init + a2 * current_time**2 + a3 * current_time**3
+		z_dot = 2 * a2*current_time + 3 * a3 * current_time**2
 
-	elif t >= t_final:
+	elif current_time >= t_final:
 		z = z_final
 		z_dot = 0
 
@@ -347,6 +371,7 @@ def PressureCallback(data):
 	global depth_wrt_startup
 	global init_p0
 	global t
+	global sample_time
 	
 	global Sum_Errors_depth
 
@@ -380,22 +405,23 @@ def PressureCallback(data):
 
 	# setup depth servo control here
 	# TASK 1.5, 1.6, 2.3, 2.5, 2.7 Start
-	depth_des = 0.8
+	# depth_des = 0.4
 	
-	#depth_des, depth_des_dot = cubic_traj(t) # For Practical Work 2
-	#t = t + sample_time
+	depth_des, depth_des_dot = cubic_traj_depth(t) # For Practical Work 2
+	t = t + sample_time
 	
-	Kp_depth = 0
-	Ki_depth = 0
-	Kd_depth = 0
+	Kp_depth = 30
+	Ki_depth = 0.01
+	Kd_depth = 0.1
 
-	floatability = 3.5 # Adding the floatability as a PMW value.
+	floatability = 14 # Adding the floatability as a PMW value.
+	# floatability = 0
 
 	error = depth_des - depth_wrt_startup
 	Sum_Errors_depth += error * sample_time
 
-	f = Kp_depth * error + Ki_depth * Sum_Errors_depth + floatability 
-	#f = Kp_depth * error + Ki_depth * Sum_Errors_depth + Kd_depth * ( depth_des_dot - estimateHeave(depth_wrt_startup) ) + floatability 
+	# f = -(Kp_depth * error + Ki_depth * Sum_Errors_depth + floatability)/4
+	f = Kp_depth * error + Ki_depth * Sum_Errors_depth + Kd_depth * ( depth_des_dot - estimateHeave(depth_wrt_startup) ) + floatability 
 
 	# update Correction_depth
 	Correction_depth = force_to_PWM(f)
