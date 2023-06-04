@@ -144,6 +144,8 @@ for bagFile in listOfBagFiles:
 				# write the value from each pair to the file
 				values = [str(t)]	#first column will have rosbag timestamp
 				for pair in instantaneousListOfData:
+					if len(pair) < 2:
+						continue
 					# print(pair)
 					values.append(pair[1])
 				filewriter.writerow(values)
