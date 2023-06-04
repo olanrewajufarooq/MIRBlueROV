@@ -58,11 +58,8 @@ t = 0
 sample_time = 1/20
 
 # Initialize Correction values
-prev_depth_pred = 0
-prev_depthrate_pred = 0
-
-prev_yaw_pred = 0
-prev_yawrate_pred = 0
+Correction_depth = 1500
+Correction_yaw = 1500
 
 Sum_Errors_dist = 0
 
@@ -101,14 +98,10 @@ def force_to_PWM(f):
 	Currently in Use: 16V
 	"""
 
-	# if f > 0:
-	# 	PWM = 1563 + 6.6610 * f
-	# elif f < 0:
-	# 	PWM = 1437 + 8.5565 * f
 	if f > 0:
-		PWM = 1536 + 9.3 * f
+		PWM = 1563 + 6.6610 * f
 	elif f < 0:
-		PWM = 1464 + 11.9 * f
+		PWM = 1437 + 8.5565 * f
 	else:
 		PWM = 1500
 	
@@ -126,22 +119,6 @@ def joyCallback(data):
 	global Sum_Errors_angle_yaw
 	global Sum_Errors_depth
 	global Sum_Errors_dist
-
-	global STATE
-	global SEARCH_TYPE
-	global USE_DEPTH_CONTROL
-
-	global prev_depth_pred
-	global prev_depthrate_pred
-	global prev_yaw_pred
-	global prev_yawrate_pred
-
-	global Correction_depth
-	
-	global re_initialize_time
-	global yaw_des
-	global pause_for_state_change
-	global stop_pause_time
 
 	# Joystick buttons
 	btn_arm = data.buttons[7]  # Start button
@@ -180,24 +157,6 @@ def joyCallback(data):
 		Sum_Errors_depth = 0
 		Sum_Errors_angle_yaw = 0
 		Sum_Errors_dist = 0
-
-		STATE = "STOP"
-		SEARCH_TYPE = "SWAY" # Options: "YAW", "SWAY"
-		USE_DEPTH_CONTROL = True
-
-		re_initialize_time = False
-		yaw_des = 0
-
-		pause_for_state_change = False
-		stop_pause_time = 5
-
-		prev_depth_pred = 0
-		prev_depthrate_pred = 0
-		prev_yaw_pred = 0
-		prev_yawrate_pred = 0
-
-		Correction_depth = 1500
-
 		# TASK End
 
 		set_mode[0] = False
@@ -248,14 +207,86 @@ def pingerCallback(data):
 	global pinger_confidence
 	global pinger_distance
 
+	global Correction_depth
+	global Correction_yaw
+
+	global Sum_Errors_dist
+	global sample_time
+
 	pinger_distance = data.data[0]
 	pinger_confidence = data.data[1]
 
-	# Publihing the Distance Data
+	max_dist_allowed = 800
+
+	# Publishing the Distance Data
 	
 	current_dist = Float64()
 	current_dist.data = pinger_distance
 	pub_dist.publish(current_dist)
+	
+	# depth_des, depth_des_dot = cubic_traj_depth(t) # For Practical Work 2
+	# t = t + sample_time
+
+	# if pinger_distance >= 1000:
+	# 	Correction_dist = 1560
+
+	# elif pinger_distance < 800:
+	# 	Correction_dist = 1470
+	# else:
+	# 	Correction_dist = 1510
+
+	if pinger_distance <= max_dist_allowed + 500:
+		Kp_dist = 0.0005
+		Ki_dist = 0.0000005
+		Kd_dist = 0
+
+		error = pinger_distance - max_dist_allowed
+
+		Sum_Errors_dist += error * sample_time
+
+		f = (Kp_dist * error + Ki_dist * Sum_Errors_dist)/1000
+		# f = Kp_dist * error + Ki_dist * Sum_Errors_dist + Kd_dist * ( depth_des_dot - estimateHeave(depth_wrt_startup) )
+
+		# update Correction_depth
+
+		if f > 0.002:
+			f = 0.002
+
+		elif f < -0.002:
+			f = -0.002
+
+		
+		Correction_dist = force_to_PWM(f)
+		
+		
+		print(error, pinger_distance, f, Correction_dist)
+		# Correction_dist = 1500
+
+	else:
+		Correction_dist = 1560
+		print(pinger_distance)
+
+	# Send PWM commands to motors
+	Correction_dist = int(Correction_dist)
+	setOverrideRCIN(1500, 1500, 1500, 1500, Correction_dist, 1500)
+
+
+def cubic_traj_yaw(current_time):
+
+	z_init = 0
+	z_final = z_init + 90
+	t_final = 10
+
+	if current_time < t_final:
+		a2 = 3 * (z_final - z_init) / (t_final ** 2)
+		a3 = -2 * (z_final - z_init) / (t_final ** 3)
+
+		z = z_init + a2 * current_time**2 + a3 * current_time**3
+
+	elif current_time >= t_final:
+		z = z_final
+
+	return z
 
 
 def OdoCallback(data):
@@ -270,21 +301,7 @@ def OdoCallback(data):
 	global sample_time
 	global t
 
-	global Correction_depth
-
 	global Sum_Errors_angle_yaw
-
-	global pinger_distance
-	global theta0
-	global re_initialize_time
-	global yaw_des
-
-	global SEARCH_TYPE
-	global STATE
-	global USE_DEPTH_CONTROL
-
-	global pause_for_state_change
-	global stop_pause_time
 
 	orientation = data.orientation
 	angular_velocity = data.angular_velocity
@@ -331,156 +348,30 @@ def OdoCallback(data):
 	if (set_mode[0]):
 		return
 
-	# PID CONTROL FOR HEADING
+	# Send PWM commands to motors
+	# yaw command to be adapted using sensor feedback
 
-	# Initialize Sway Control
-	Correction_sway = 1500
-
-	# # STABILIZING YAW ANGLE
-	if not (STATE == "SEARCH FREE PATH" and SEARCH_TYPE == "YAW"):
-		# yaw_des = cubic_traj_yaw(t, theta0 = 0, dtheta = 0)
-		yaw_des = 0
+	# TASK 1.4, 2.5 Start
 	
-	# # SEARCHING FREE PATH
-	# elif (STATE == "SEARCH FREE PATH") and (SEARCH_TYPE == "YAW"):
-	# 	# Start time count
-	# 	if re_initialize_time:
-	# 		t = 0
-	# 		theta0 = angle_wrt_startup[2]
-	# 		re_initialize_time = False
-
-	# 	yaw_des = cubic_traj_yaw(t, theta0 = theta0, dtheta = 90)
-	# 	print(yaw_des)
-
-	# # MOVING IN SWAY
-	# elif (STATE == "SEARCH FREE PATH") and (SEARCH_TYPE == "SWAY"):
-	# 	Correction_sway = 1550
-
-
-
-	# yaw_des = 0 # desired yaw angle
-	yaw_des_dot = 0 # desired yaw rate
+	yaw_des = 0 # desired yaw angle
+	# yaw_des = cubic_traj_yaw(t)
 	t = t + sample_time
 	
-	#PI parameters to tune
-	# kp_yaw = 5e-8
-	# ki_yaw = 1e-10
-	# Kd_yaw = 1e-10
-
-	kp_yaw = 0.005
-	ki_yaw = 0.0001
-	Kd_yaw = 0.001
+	#PI parameters to tune  
+	kp_yaw = 0.1
+	ki_yaw = 0.0005
 	
 	# error calculation
 	yaw_err = yaw_des - angle_wrt_startup[2]
 	Sum_Errors_angle_yaw += yaw_err * sample_time # we need to define SAMPLE TIME
-	diff_error = yaw_des_dot - estimateRate(angle_wrt_startup[2], state="yaw")
 	
-	# PID controller 
-	# f = -(kp_yaw * yaw_err + ki_yaw * Sum_Errors_angle_yaw)/4
-	f = -(kp_yaw * yaw_err + ki_yaw * Sum_Errors_angle_yaw + Kd_yaw * diff_error)/4
-
-
+	# PI controller 
+	f = -(kp_yaw * yaw_err + ki_yaw * Sum_Errors_angle_yaw)/4
 	Correction_yaw = force_to_PWM(f) 
+	
+	# TASK 1.4, 2.5 End
 	Correction_yaw = int(Correction_yaw)
-
-
-	# STATE MACHINE TRANSITIONS
-
-	max_allowed_dist = 1000
-	tol = 200
-	
-	if not pause_for_state_change:
-		
-		# pause_for_state_change = True
-		# stop_pause_time = t + sample_time
-
-		if STATE == "STOP" and (pinger_distance > max_allowed_dist):
-			STATE = "SURGE"
-		
-		elif STATE == "STOP" and (pinger_distance <= max_allowed_dist):
-			STATE = "SEARCH FREE PATH"
-			re_initialize_time = True
-		
-		elif STATE == "SEARCH FREE PATH" and (pinger_distance >= max_allowed_dist):
-		
-			if SEARCH_TYPE == "YAW":
-				init_a0 = True # Resetting current angle as the zero angle.
-				yaw_des = 0
-				Sum_Errors_angle_yaw = 0
-			
-			STATE = "SURGE"
-
-		elif (STATE == "SURGE") and (pinger_distance < max_allowed_dist):
-			STATE = "STOP"
-	
-	elif pause_for_state_change:
-		if t >= stop_pause_time:
-			pause_for_state_change = False
-
-
-	# Printing State Information:
-
-	print(f"STATE: {STATE:5}. Pinger Distance = {pinger_distance:5.2f}. Pinger Confidence = {pinger_confidence:3.2f}")
-	
-
-
-	# DISTANCE CONTROL
-
-	if STATE in ["STOP", "SEARCH FREE PATH"]:
-		Correction_dist = 1500
-	
-	elif STATE == "SURGE" and ( max_allowed_dist < pinger_distance < max_allowed_dist + tol ):
-		Correction_dist = 1515
-	
-	elif STATE == "SURGE" and (pinger_distance > 8000):
-		Correction_dist = 1640
-
-	elif STATE == "SURGE" and (pinger_distance > 6000):
-		Correction_dist = 1600
-
-	elif STATE == "SURGE" and (pinger_distance > 4000):
-		Correction_dist = 1560
-
-	elif STATE == "SURGE":
-		Correction_dist = 1530
-
-	# SEARCH FREE PATH
-
-	# Initialize Sway Control
-	Correction_sway = 1500
-
-	if (STATE == "SEARCH FREE PATH") and (SEARCH_TYPE == "YAW"):
-	# 	# Start time count
-	# 	if re_initialize_time:
-	# 		t = 0
-	# 		theta0 = angle_wrt_startup[2]
-	# 		re_initialize_time = False
-
-	# 	yaw_des = cubic_traj_yaw(t, theta0 = theta0, dtheta = 90)
-	# 	print(yaw_des)
-		
-		yaw_des = yaw_des + 0.5
-
-
-		if pinger_confidence < 60: 
-			Correction_yaw = 1500
-			Correction_dist = 1440
-
-
-		if yaw_des >= 360:
-			yaw_des = 0
-
-	# # MOVING IN SWAY
-	elif (STATE == "SEARCH FREE PATH") and (SEARCH_TYPE == "SWAY"):
-		Correction_sway = 1550
-
-	
-
-	if USE_DEPTH_CONTROL:
-		setOverrideRCIN(1500, 1500, Correction_depth, Correction_yaw, Correction_dist, Correction_sway)
-	else:
-		setOverrideRCIN(1500, 1500, 1500, Correction_yaw, Correction_dist, Correction_sway)
+	# setOverrideRCIN(1500, 1500, 1500, Correction_yaw, 1500, 1500)
 
 
 def DvlCallback(data):
@@ -500,14 +391,56 @@ def DvlCallback(data):
 	pub_linear_velocity.publish(Vel)
 
 
+def cubic_traj_depth(current_time):
+
+	z_init = 0
+	z_final = 0.4
+	t_final = 20
+
+	if current_time < t_final:
+		a2 = 3 * (z_final - z_init) / (t_final ** 2)
+		a3 = -2 * (z_final - z_init) / (t_final ** 3)
+
+		z = z_init + a2 * current_time**2 + a3 * current_time**3
+		z_dot = 2 * a2*current_time + 3 * a3 * current_time**2
+
+	elif current_time >= t_final:
+		z = z_final
+		z_dot = 0
+
+	return z, z_dot
+
+# TASK 2.6 Start
+def estimateHeave(depth, prev_depth=None, prev_heave=None):
+	global sample_time
+
+	alpha = 0.45
+	beta = 0.1
+
+	if prev_depth is None:
+		heave = 0
+	else:
+		heave = (depth - prev_depth) / sample_time
+
+    # Update position and velocity estimates using alpha-beta filter
+	if prev_heave is None:
+		filtered_depth = depth
+		filtered_heave = heave
+		
+	else:
+		filtered_depth = prev_depth + sample_time * prev_heave + 0.5 * beta * sample_time**2 * (heave + prev_heave)
+		filtered_heave = prev_heave + alpha * sample_time * (heave + prev_heave)
+
+	return filtered_heave
+# TASK 2.6 End
+
+
 def PressureCallback(data):
 	global depth_p0
 	global depth_wrt_startup
 	global init_p0
-	
 	global t
 	global sample_time
-	global prev_depth
 	
 	global Sum_Errors_depth
 
@@ -542,110 +475,34 @@ def PressureCallback(data):
 	pub_depth.publish(current_depth)
 
 	# setup depth servo control here
+	# TASK 1.5, 1.6, 2.3, 2.5, 2.7 Start
+	depth_des = 0.4
 	
-	depth_des = 0.2
-	depth_des_dot = 0
 	# depth_des, depth_des_dot = cubic_traj_depth(t) # For Practical Work 2
-
 	t = t + sample_time
 	
 	Kp_depth = 50
-	Ki_depth = 0.015
+	Ki_depth = 0.01
 	Kd_depth = 0
 
-	floatability = 14
+	floatability = 14 # Adding the floatability as a PMW value.
+	# floatability = 0
 
 	error = depth_des - depth_wrt_startup
 	Sum_Errors_depth += error * sample_time
-	diff_error = depth_des_dot - estimateRate(depth_wrt_startup, state="depth")
-	
-	# Updating the value of prev_depth for depth rate estimation
-	prev_depth = depth_wrt_startup 
 
-	# f = -(Kp_depth * error + Ki_depth * Sum_Errors_depth + floatability)/4
-	f = -( Kp_depth * error + Ki_depth * Sum_Errors_depth + Kd_depth * diff_error + floatability )/4
+	f = -(Kp_depth * error + Ki_depth * Sum_Errors_depth + floatability)/4
+	# f = Kp_depth * error + Ki_depth * Sum_Errors_depth + Kd_depth * ( depth_des_dot - estimateHeave(depth_wrt_startup) ) + floatability 
 
 	# update Correction_depth
 	Correction_depth = force_to_PWM(f)
+	# Correction_depth = int(1595.9765)
+
+	# TASK 1.5, 1.6, 2.3, 2.5, 2.7 End
+
+	# Send PWM commands to motors
 	Correction_depth = int(Correction_depth)
-
 	# setOverrideRCIN(1500, 1500, Correction_depth, 1500, 1500, 1500)
-
-
-def cubic_traj_depth(current_time):
-
-	z_init = 0
-	z_final = 0.4
-	t_final = 20
-
-	if current_time < t_final:
-		a2 = 3 * (z_final - z_init) / (t_final ** 2)
-		a3 = -2 * (z_final - z_init) / (t_final ** 3)
-
-		z = z_init + a2 * current_time**2 + a3 * current_time**3
-		z_dot = 2 * a2*current_time + 3 * a3 * current_time**2
-
-	elif current_time >= t_final:
-		z = z_final
-		z_dot = 0
-
-	return z, z_dot
-
-
-def cubic_traj_yaw(current_time, theta0 = 0, dtheta = 90):
-
-	z_init = theta0
-	z_final = theta0 + dtheta
-	t_final = 10
-
-	if current_time < t_final:
-		a2 = 3 * (z_final - z_init) / (t_final ** 2)
-		a3 = -2 * (z_final - z_init) / (t_final ** 3)
-
-		z = z_init + a2 * current_time**2 + a3 * current_time**3
-
-	elif current_time >= t_final:
-		z = z_final
-
-	return z
-
-
-def estimateRate(new_measurement, state = "depth", alpha = 0.45, beta = 0.1):
-	global sample_time
-
-	global prev_depth_pred
-	global prev_depthrate_pred
-	
-	global prev_yaw_pred
-	global prev_yawrate_pred
-
-	if state == "depth":
-		prev_state_pred = prev_depth_pred
-		prev_staterate_pred = prev_depthrate_pred
-	elif state == "yaw":
-		prev_state_pred = prev_yaw_pred
-		prev_staterate_pred = prev_yawrate_pred
-
-    # Predicting current states
-	state_pred = prev_state_pred + sample_time * prev_staterate_pred
-	staterate_pred = prev_staterate_pred
-
-	# Computing the errors
-	error = new_measurement - state_pred
-
-	# Computing new state estimates
-	updated_state_pred = state_pred + alpha * error
-	updated_staterate_pred = staterate_pred + (beta / sample_time) * error
-
-	if state == "depth":
-		prev_state_pred = updated_state_pred
-		prev_staterate_pred = updated_staterate_pred
-	elif state == "yaw":
-		prev_state_pred = updated_state_pred
-		prev_staterate_pred = updated_staterate_pred
-
-	return updated_staterate_pred
-
 
 
 def mapValueScalSat(value):
